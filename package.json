@@ -1,0 +1,10 @@
+{
+  "name": "election-night-2026-pickem",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Static GitHub Pages election-night prediction game",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
+}
