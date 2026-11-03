@@ -18,7 +18,14 @@ const forecastFor=(uid)=>game?.forecasts.find(f=>f.user_id===uid);
 const currentName=()=>game?.profiles.find(p=>p.user_id===game.currentId)?.display_name ?? 'Player';
 const resultMap=()=>new Map((game?.results??[]).map(r=>[r.race_id,r.candidate_key]));
 const yourPicks=()=>picksFor(game.currentId);
-const scoreboard=()=>scoreGame(races,game.profiles,game.picks,game.results,game.forecasts,game.settings);
+const scoreboard=()=>{
+  const scores=scoreGame(races,game.profiles,game.picks,game.results,game.forecasts,game.settings);
+  if (game.pickCounts) {
+    const counts=new Map(game.pickCounts.map(p=>[p.user_id,Number(p.picks_count)]));
+    for(const player of scores.players) player.picksCount=counts.get(player.user_id)??player.picksCount;
+  }
+  return scores;
+};
 const yourScore=()=>scoreboard().players.find(p=>p.user_id===game.currentId);
 const hasProfile=()=>game?.profiles.some(p=>p.user_id===game.currentId);
 
