@@ -3,6 +3,7 @@ import { scoreGame, candidateFor, breakdown } from './scoring.mjs';
 
 let backend, races=[], mapMarkup='', game=null;
 let view='map', selectedState='TX', ballotFilter='all', adminState='ALL', accountOpen=false;
+let accountStatus=null, sentUpgradeEmail='';
 let toastTimeout=null, busy=false;
 const app=document.getElementById('app');
 const raceMap=new Map();
@@ -27,7 +28,7 @@ function notify(message,isError=false) {
  el.textContent=message;el.className=`toast show${isError?' toast-error':''}`;
  toastTimeout=setTimeout(()=>{el.className='toast';},4400);
 }
-async function update() { game=await backend.load(); render(); }
+async function update() { game=await backend.load(); if(!game.isDemo && (!accountStatus||view==='upgrade'))accountStatus=await backend.getAuthStatus();render(); }
 async function run(fn,done='Saved') {
  if(busy)return;
  busy=true;
@@ -43,7 +44,7 @@ async function boot(){
   for(const r of races)raceMap.set(r.id,r);
   backend=await createBackend();
   await backend.getSession();
-  if(backend.isLoggedIn())game=await backend.load();
+  if(backend.isLoggedIn()){game=await backend.load();if(!game.isDemo)accountStatus=await backend.getAuthStatus();}
   render();
   setInterval(async()=>{
    if(!backend?.isLoggedIn()||busy||document.hidden||document.activeElement?.matches('input, textarea, select'))return;
@@ -81,7 +82,7 @@ function render(){
      <nav class="tabs" aria-label="Game sections">
        ${navTab('map','◈','THE MAP')}${navTab('ballot','▤','MY BALLOT')}${navTab('leaderboard','▥','LEADERBOARD')}${navTab('bonus','✦','SEAT PREDICTIONS')}${game.isAdmin?navTab('admin','⚙','HOST CONTROL'):''}
      </nav>
-     ${view==='map'?renderMapView():view==='ballot'?renderBallot():view==='leaderboard'?renderLeaderboard():view==='bonus'?renderBonus():view==='admin'&&game.isAdmin?renderAdmin():renderMapView()}
+     ${view==='map'?renderMapView():view==='ballot'?renderBallot():view==='leaderboard'?renderLeaderboard():view==='bonus'?renderBonus():view==='admin'&&game.isAdmin?renderAdmin():view==='upgrade'?renderUpgrade():renderMapView()}
      <footer><div><span class="footer-star">★</span> ELECTION NIGHT 2026</div><span>41 HOUSE RACES · 13 SENATE RACES · 10 BONUS POINTS</span><span>MADE FOR FRIENDLY COMPETITION</span></footer>
    </main>
  </div>`;
@@ -93,11 +94,31 @@ function renderAccount(){
  ${game.isDemo?`<div class="account-menu-label">SWITCH TEST PLAYER</div>${game.profiles.map(p=>`<button class="menu-item ${p.user_id===game.currentId?'active':''}" data-action="switch-player" data-id="${p.user_id}">${clean(p.display_name)} ${p.user_id===game.currentId?'✓':''}</button>`).join('')}`:''}
  <button class="menu-item" data-action="rename">✎ &nbsp; Change display name</button>
  ${!game.isDemo?'<button class="menu-item" data-action="copy-id">⎘ &nbsp; Copy my player ID (host setup)</button>':''}
+ ${!game.isDemo?`<button class="menu-item" data-action="upgrade">${accountStatus?.isAnonymous?'✉ &nbsp; Make account permanent':'🔒 &nbsp; Email & password settings'}</button>`:''}
  ${!game.isDemo?'<button class="menu-item" data-action="logout">↪ &nbsp; Sign out</button>':''}
  <button class="menu-item" data-action="account">Close menu</button></div>`;
 }
 function renderAuth(){
- app.innerHTML=`<div class="auth-page"><div class="auth-art"><div class="auth-star">★</div><p>2026 ELECTION NIGHT</p><h1>MAKE YOUR<br><em>CALL.</em></h1><div class="auth-stripe"></div><span>54 races. 134 possible points.<br>Unlimited bragging rights.</span></div><div class="auth-content"><div class="auth-card"><p class="eyebrow">JOIN THE GAME</p><h2>You're on the board.</h2><p>Join instantly with a nickname, or sign in with email. Each friend gets their own saved picks and a spot on the shared leaderboard.</p><button class="btn btn-primary btn-wide guest-btn" data-action="join-guest">JOIN INSTANTLY AS A GUEST <span>→</span></button><div class="auth-or">OR USE EMAIL SIGN-IN</div><form id="login-form"><label for="login-email">EMAIL ADDRESS</label><input id="login-email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required><button type="submit" class="btn btn-primary btn-wide">EMAIL MY SIGN-IN LINK <span>→</span></button></form><div class="auth-foot">Guest sessions stay on this device. Email sign-in works across devices but requires SMTP setup by the host.</div></div></div></div>`;
+ app.innerHTML=`<div class="auth-page"><div class="auth-art"><div class="auth-star">★</div><p>2026 ELECTION NIGHT</p><h1>MAKE YOUR<br><em>CALL.</em></h1><div class="auth-stripe"></div><span>54 races. 134 possible points.<br>Unlimited bragging rights.</span></div><div class="auth-content"><div class="auth-card"><p class="eyebrow">JOIN THE GAME</p><h2>You're on the board.</h2><p>Join instantly with a nickname, or sign in with email. Each friend gets their own saved picks and a spot on the shared leaderboard.</p><button class="btn btn-primary btn-wide guest-btn" data-action="join-guest">JOIN INSTANTLY AS A GUEST <span>→</span></button><div class="auth-or">OR USE EMAIL SIGN-IN</div><form id="password-login-form"><label for="password-login-email">EMAIL ADDRESS</label><input id="password-login-email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required><label for="password-login-password">PASSWORD</label><input id="password-login-password" name="password" type="password" autocomplete="current-password" required><button type="submit" class="btn btn-primary btn-wide">SIGN IN WITH PASSWORD <span>→</span></button></form><div class="auth-or">OR EMAIL ME A SIGN-IN LINK</div><form id="login-form"><label for="login-email">EMAIL ADDRESS</label><input id="login-email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required><button type="submit" class="btn btn-secondary btn-wide">EMAIL MY SIGN-IN LINK <span>→</span></button></form><div class="auth-foot">Guest sessions stay on this device. Password login works across devices. Email links and account verification may require Supabase SMTP setup.</div></div></div></div>`;
+}
+function renderUpgrade(){
+ const isGuest=accountStatus?.isAnonymous!==false;
+ const status=isGuest?'GUEST ACCOUNT':'PERMANENT ACCOUNT';
+ return `<section class="content-view" style="max-width:700px;margin:0 auto">
+  <div class="view-title-row"><div><p class="section-overline">ACCOUNT SECURITY</p><h2>KEEP YOUR <em>HOST ACCESS.</em></h2><p>Your player ID and admin permissions stay the same when you link your email to this guest account.</p></div></div>
+  <div class="host-final" style="max-width:680px;margin-top:26px">
+   <p class="section-overline">${status}</p>
+   <h3>${isGuest?'LINK AN EMAIL':'CREATE A PASSWORD'}</h3>
+   ${isGuest?`<p>Use an email address you can access. Supabase will send a verification link. Open it in <strong>this same browser</strong>, then return here and refresh. Do not sign out until your permanent login is confirmed.</p>
+    <form id="upgrade-email-form" style="margin-top:22px"><label for="upgrade-email">EMAIL ADDRESS</label><input id="upgrade-email" class="account-upgrade-input" style="display:block;width:100%;background:#172641;border:1px solid #50607d;color:#fff;padding:14px;margin:9px 0 18px;border-radius:4px" type="email" autocomplete="email" placeholder="you@example.com" required><button class="btn btn-primary" type="submit">SEND VERIFICATION EMAIL →</button></form>
+    ${sentUpgradeEmail?`<p class="account-upgrade-note">Verification requested for <strong>${clean(sentUpgradeEmail)}</strong>. Check your inbox and spam folder. Then click <strong>Refresh account status</strong> below.</p>`:''}
+   `:`<p>Email linked: <strong>${clean(accountStatus?.email??'')}</strong>. Your player ID and game-host privileges are preserved. Choose a password you will use when signing in from other devices.</p>
+     <form id="upgrade-password-form" style="margin-top:22px"><label for="upgrade-password">NEW PASSWORD (12+ CHARACTERS)</label><input id="upgrade-password" class="account-upgrade-input" style="display:block;width:100%;background:#172641;border:1px solid #50607d;color:#fff;padding:14px;margin:9px 0 18px;border-radius:4px" type="password" autocomplete="new-password" minlength="12" required><label for="upgrade-password-confirm">CONFIRM PASSWORD</label><input id="upgrade-password-confirm" class="account-upgrade-input" style="display:block;width:100%;background:#172641;border:1px solid #50607d;color:#fff;padding:14px;margin:9px 0 18px;border-radius:4px" type="password" autocomplete="new-password" minlength="12" required><button class="btn btn-primary" type="submit">SAVE PASSWORD →</button></form>
+     <p class="account-upgrade-note">After saving, verify your account from another browser using email and password before signing out here.</p>
+   `}
+   <div style="margin-top:18px;display:flex;flex-wrap:wrap;gap:10px"><button class="btn btn-secondary" data-action="refresh-account">REFRESH ACCOUNT STATUS</button><button class="btn btn-secondary" data-action="cancel-upgrade">BACK TO GAME</button></div>
+  </div>
+ </section>`;
 }
 function renderOnboard(){
  app.innerHTML=`<div class="auth-page"><div class="auth-art"><div class="auth-star">★</div><p>YOU'RE IN</p><h1>WHAT'S<br><em>YOUR NAME?</em></h1></div><div class="auth-content"><div class="auth-card"><p class="eyebrow">CREATE YOUR PLAYER CARD</p><h2>Pick a scoreboard name.</h2><p>Friends will see this name on the leaderboard.</p><form id="name-form"><label for="onboard-name">DISPLAY NAME</label><input id="onboard-name" name="name" maxlength="32" minlength="2" placeholder="Your name" required><button class="btn btn-primary btn-wide" type="submit">JOIN THE BOARD →</button></form></div></div></div>`;
@@ -185,13 +206,16 @@ document.addEventListener('click',async e=>{
   if(action==='clear-pick'){await run(()=>backend.clearPick(btn.dataset.race),'Prediction cleared');return;}
   if(action==='join-guest'){await run(()=>backend.signInGuest(),'Guest account created');return;}
   if(action==='copy-id'){try {await navigator.clipboard.writeText(game.currentId);notify('Player ID copied');} catch {prompt('Copy your player ID:',game.currentId);}return;}
+  if(action==='upgrade'){accountOpen=false;view='upgrade';accountStatus=await backend.getAuthStatus();render();return;}
+  if(action==='cancel-upgrade'){view='map';render();return;}
+  if(action==='refresh-account'){await run(async()=>{await backend.getSession();accountStatus=await backend.getAuthStatus();},'Account status updated');return;}
   if(action==='switch-player'){await run(()=>backend.switchPlayer(btn.dataset.id),'Switched test player');accountOpen=false;return;}
   if(action==='rename'){
    accountOpen=false;const name=prompt('Your display name (2–32 characters):',currentName());
    if(name===null)return;const trimmed=name.trim();if(trimmed.length<2||trimmed.length>32){notify('Name must be 2–32 characters.',true);return;}
    await run(()=>backend.saveProfile(trimmed),'Name updated');return;
   }
-  if(action==='logout'){if(!confirm('Sign out? Guest accounts cannot be recovered on this device without linking an email.'))return;try{await backend.logout();game=null;accountOpen=false;render();notify('Signed out');}catch(err){notify(err.message,true);}return;}
+  if(action==='logout'){if(!confirm(accountStatus?.isAnonymous?'Sign out? This guest account cannot be recovered unless you link an email first.':'Sign out of this device?'))return;try{await backend.logout();game=null;accountStatus=null;accountOpen=false;render();notify('Signed out');}catch(err){notify(err.message,true);}return;}
   if(action==='toggle-lock'){
    const message=game.settings.picks_locked?'Reopen predictions? This is allowed only when all race results and final seat totals are cleared.':'Lock all predictions? No player will be able to change picks or seat predictions.';
    if(!confirm(message))return;
@@ -222,11 +246,24 @@ document.addEventListener('input',e=>{
  if(target){const el=document.getElementById(target[0]);if(el)el.textContent=value===null||!Number.isInteger(value)||value<0||value>target[1]?'—':target[1]-value;}
 });
 document.addEventListener('submit',async e=>{
- if(!['login-form','name-form','forecast-form','final-totals-form'].includes(e.target.id))return;
+ if(!['login-form','password-login-form','upgrade-email-form','upgrade-password-form','name-form','forecast-form','final-totals-form'].includes(e.target.id))return;
  e.preventDefault();const form=e.target;
  if(form.id==='login-form'){
   const email=form.querySelector('#login-email').value.trim();
   try{await backend.sendMagic(email);notify('Sign-in email sent. Check your inbox.');}catch(err){notify(err.message,true);}return;
+ }
+ if(form.id==='password-login-form'){
+  const email=form.querySelector('#password-login-email').value.trim(),password=form.querySelector('#password-login-password').value;
+  await run(async()=>{await backend.signInPassword(email,password);accountStatus=await backend.getAuthStatus();},'Signed in');return;
+ }
+ if(form.id==='upgrade-email-form'){
+  const email=form.querySelector('#upgrade-email').value.trim();
+  await run(async()=>{await backend.startUpgrade(email);sentUpgradeEmail=email;},'Verification email requested. Check your inbox.');return;
+ }
+ if(form.id==='upgrade-password-form'){
+  const password=form.querySelector('#upgrade-password').value,confirmation=form.querySelector('#upgrade-password-confirm').value;
+  if(password!==confirmation)return notify('Passwords do not match.',true);
+  await run(async()=>{await backend.setPassword(password);accountStatus=await backend.getAuthStatus();},'Password saved. Your permanent account is ready.');return;
  }
  if(form.id==='name-form'){
   const name=form.querySelector('#onboard-name').value.trim();if(name.length<2||name.length>32)return notify('Use 2–32 characters',true);
