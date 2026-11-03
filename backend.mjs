@@ -35,6 +35,10 @@ function createDemoBackend() {
     async saveSettings(patch){assertAdmin();if(data.settings.picks_locked && patch.picks_locked===false && (data.results.length || data.settings.senate_dem_final!==null || data.settings.house_dem_final!==null))throw new Error('Clear all results and final seat totals before unlocking picks.');Object.assign(data.settings,patch);commit();},
     async switchPlayer(id){if(!data.profiles.some(p=>p.user_id===id))throw new Error('Unknown demo player.');data.currentId=id;commit();},
     async sendMagic(){throw new Error('Email sign-in requires Supabase.');}, async signInGuest(){}, async logout(){},
+    async signInPassword(){throw new Error('Password sign-in requires Supabase.');},
+    async startUpgrade(){throw new Error('Account upgrade requires Supabase.');},
+    async setPassword(){throw new Error('Account upgrade requires Supabase.');},
+    async getAuthStatus(){return {isAnonymous:false,email:null};},
     async getSession(){return {user:{id:data.currentId}};},
   };
 }
@@ -47,6 +51,31 @@ function createSupabaseBackend(supabase) {
     isLoggedIn:()=>Boolean(user),
     async getSession(){const session=await call(supabase.auth.getSession());user=session.session?.user || null;return {user};},
     async sendMagic(email){await call(supabase.auth.signInWithOtp({email,options:{emailRedirectTo:window.location.origin+window.location.pathname}}));},
+    async signInPassword(email,password){
+      const data=await call(supabase.auth.signInWithPassword({email,password}));
+      user=data.user;
+    },
+    async getAuthStatus(){
+      signed();
+      const data=await call(supabase.auth.getUser());
+      user=data.user;
+      return {isAnonymous: Boolean(user?.is_anonymous),email:user?.email||null};
+    },
+    async startUpgrade(email){
+      signed();
+      const data=await call(supabase.auth.getUser());
+      if (!data.user?.is_anonymous) throw new Error('This account already has a permanent sign-in identity.');
+      if (!email || !email.includes('@')) throw new Error('Enter a valid email address.');
+      await call(supabase.auth.updateUser({email}));
+    },
+    async setPassword(password){
+      signed();
+      const data=await call(supabase.auth.getUser());
+      if (data.user?.is_anonymous || !data.user?.email_confirmed_at)
+        throw new Error('Verify your email first using the email from Supabase, then refresh this page.');
+      if (password.length < 12) throw new Error('Use a password with at least 12 characters.');
+      await call(supabase.auth.updateUser({password}));
+    },
     async signInGuest(){const data=await call(supabase.auth.signInAnonymously());user=data.user;},
     async logout(){await call(supabase.auth.signOut());user=null;},
     async load(){signed();
