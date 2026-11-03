@@ -79,15 +79,16 @@ function createSupabaseBackend(supabase) {
     async signInGuest(){const data=await call(supabase.auth.signInAnonymously());user=data.user;},
     async logout(){await call(supabase.auth.signOut());user=null;},
     async load(){signed();
-      const [profiles,picks,forecasts,results,settings,admin]=await Promise.all([
+      const [profiles,picks,forecasts,results,settings,admin,pickCounts]=await Promise.all([
         call(supabase.from('profiles').select('user_id,display_name')),
         call(supabase.from('picks').select('user_id,race_id,candidate_key')),
         call(supabase.from('forecasts').select('user_id,senate_dem,senate_rep,house_dem,house_rep')),
         call(supabase.from('results').select('race_id,candidate_key')),
         call(supabase.from('game_settings').select('*').eq('id',1).single()),
         call(supabase.from('admins').select('user_id').eq('user_id',user.id)),
+        call(supabase.rpc('get_pick_counts')),
       ]);
-      return {profiles,picks,forecasts,results,settings,currentId:user.id,isAdmin:admin.length>0,isDemo:false};
+      return {profiles,picks,forecasts,results,settings,pickCounts,currentId:user.id,isAdmin:admin.length>0,isDemo:false};
     },
     async saveProfile(name){signed();await call(supabase.from('profiles').upsert({user_id:user.id,display_name:name},{onConflict:'user_id'}));},
     async savePick(race_id,candidate_key){signed();await call(supabase.from('picks').upsert({user_id:user.id,race_id,candidate_key},{onConflict:'user_id,race_id'}));},
